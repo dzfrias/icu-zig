@@ -1,0 +1,15 @@
+.{
+    .name = .icu,
+    .version = "77.1.0",
+    .fingerprint = 0xd6f8946aa1e51b17, // Changing this has security and trust implications
+    .minimum_zig_version = "0.14.1",
+    .dependencies = .{
+        .icu4c = .{
+            .url = "https://github.com/unicode-org/icu/releases/download/release-77-1/icu4c-77_1-src.tgz",
+            .hash = "N-V-__8AACwXBwe7oNiK4Z3stcf5yhVTk6QuzGn6h7kIFXvw",
+        },
+    },
+    .paths = .{
+        "",
+    },
+}
