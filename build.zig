@@ -48,13 +48,20 @@ pub fn build(b: *std.Build) void {
         target,
         optimize,
     );
-    const is_be = target.result.cpu.arch.endian() == .big;
+
+    const list_data_items = b.step("list", "List the default data file items");
+    const run_icupkg_list = b.addRunArtifact(icupkg_bin);
+    run_icupkg_list.setCwd(source);
+    run_icupkg_list.addArgs(&.{ "data/in/icudt77l.dat", "--list" });
+    list_data_items.dependOn(&run_icupkg_list.step);
+
     const run_icu = std.Build.Step.Run.create(b, "Run icupkg");
     run_icu.has_side_effects = true;
     run_icu.setCwd(source);
     run_icu.expectExitCode(0);
     run_icu.addFileArg(b.path("icupkg.sh"));
     run_icu.addFileArg(icupkg_bin.getEmittedBin());
+    const is_be = target.result.cpu.arch.endian() == .big;
     run_icu.addArg(if (is_be) "1" else "0");
     run_icu.addArg("data/in/icudt77l.dat");
     const data_file_output = run_icu.addOutputFileArg("icudt77.dat");
