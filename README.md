@@ -61,6 +61,8 @@ const c = @cImport({
 
 | Name               | Description                                                  |
 | ------------------ | ------------------------------------------------------------ |
+| `linkage`          | Specifies the link mode of the ICU libraries                 |
+| `strip`            | Allows debug information to be omitted                       |
 | `icudata-removals` | Specifies data items to remove from the `libicudata` library |
 
 ### Data Item Removals

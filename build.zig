@@ -9,6 +9,8 @@ pub fn build(b: *std.Build) void {
         "icudata-removals",
         "Data items to remove from the ICU common data file",
     ) orelse &.{};
+    const linkage = b.option(std.builtin.LinkMode, "linkage", "Link mode") orelse .static;
+    const strip = b.option(bool, "strip", "Omit debug information");
 
     const upstream = b.dependency("icu4c", .{});
     const source = upstream.path("source");
@@ -21,15 +23,16 @@ pub fn build(b: *std.Build) void {
     // the build. This script mimmics that.
     uconfig.addFileArg(b.path("uconfig.sh"));
 
-    const icuuc = libicuuc(b, target, optimize);
+    const stubdata = libstubdata(b, target, optimize, linkage, strip);
+
+    const icuuc = libicuuc(b, stubdata, target, optimize, linkage, strip);
     icuuc.step.dependOn(&uconfig.step);
-    const icui18n = libicui18n(b, target, optimize);
+    const icui18n = libicui18n(b, icuuc, target, optimize, linkage, strip);
     icui18n.step.dependOn(&uconfig.step);
-    const icuio = libicuio(b, target, optimize);
+    const icuio = libicuio(b, icuuc, icui18n, target, optimize, linkage, strip);
     icuio.step.dependOn(&uconfig.step);
 
-    const stubdata = libstubdata(b, target, optimize);
-    const icutu = libicutu(b, target, optimize);
+    const icutu = libicutu(b, icuuc, icui18n, target, optimize, linkage, strip);
     // ICU uses a stub file in order to avoid a circular dependency between the
     // ICU tools (genccode, genrb, pkgdata, etc.) and libcuuc.
     //
@@ -47,6 +50,8 @@ pub fn build(b: *std.Build) void {
         icutu,
         target,
         optimize,
+        linkage,
+        strip,
     );
 
     const list_data_items = b.step("list", "List the default data file items");
@@ -77,6 +82,8 @@ pub fn build(b: *std.Build) void {
         icutu,
         target,
         optimize,
+        linkage,
+        strip,
     );
     // We use genccode to turn the common data file (`.dat`) (which is included
     // in the dependency archive) into a C source file that holds a static array
@@ -93,7 +100,7 @@ pub fn build(b: *std.Build) void {
 
     // We then compile the outputted C source file into a static library. This
     // is libicudata.a
-    const icudata = libicudata(b, icudt_c, icuuc, target, optimize);
+    const icudata = libicudata(b, icudt_c, icuuc, target, optimize, linkage, strip);
     icudata.step.dependOn(&gen_icudt_c.step);
 
     icuuc.installHeadersDirectory(source.path(b, "common/unicode"), "unicode", .{});
@@ -116,7 +123,10 @@ fn tool(
     toolutil: *std.Build.Step.Compile,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    linkage: std.builtin.LinkMode,
+    strip: ?bool,
 ) *std.Build.Step.Compile {
+    _ = linkage;
     const upstream = b.dependency("icu4c", .{});
     const tools = upstream.path("source/tools");
 
@@ -125,8 +135,9 @@ fn tool(
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .strip = true,
+            .strip = strip,
         }),
+        .linkage = .dynamic,
     });
     exe.linkLibCpp();
     exe.linkLibrary(i18n);
@@ -146,8 +157,12 @@ fn tool(
 
 fn libicutu(
     b: *std.Build,
+    icuuc: *std.Build.Step.Compile,
+    icui18n: *std.Build.Step.Compile,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    linkage: std.builtin.LinkMode,
+    strip: ?bool,
 ) *std.Build.Step.Compile {
     const upstream = b.dependency("icu4c", .{});
     const tools = upstream.path("source/tools");
@@ -157,10 +172,14 @@ fn libicutu(
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .strip = true,
+            .strip = strip,
         }),
-        .linkage = .static,
+        .linkage = linkage,
     });
+    if (linkage == .dynamic) {
+        lib.linkLibrary(icuuc);
+        lib.linkLibrary(icui18n);
+    }
     lib.linkLibCpp();
     lib.addIncludePath(upstream.path("source/common"));
     lib.addIncludePath(upstream.path("source/i18n"));
@@ -202,8 +221,12 @@ fn libicutu(
 
 fn libicuio(
     b: *std.Build,
+    icuuc: *std.Build.Step.Compile,
+    icui18n: *std.Build.Step.Compile,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    linkage: std.builtin.LinkMode,
+    strip: ?bool,
 ) *std.Build.Step.Compile {
     const upstream = b.dependency("icu4c", .{});
     const source = upstream.path("source");
@@ -212,10 +235,14 @@ fn libicuio(
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .strip = true,
+            .strip = strip,
         }),
-        .linkage = .static,
+        .linkage = linkage,
     });
+    if (linkage == .dynamic) {
+        lib.linkLibrary(icuuc);
+        lib.linkLibrary(icui18n);
+    }
     lib.linkLibCpp();
     lib.addIncludePath(source.path(b, "common"));
     lib.addIncludePath(source.path(b, "io"));
@@ -249,15 +276,17 @@ fn libicudata(
     icuuc: *std.Build.Step.Compile,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
+    linkage: std.builtin.LinkMode,
+    strip: ?bool,
 ) *std.Build.Step.Compile {
     const lib = b.addLibrary(.{
         .name = "icudata",
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .strip = true,
+            .strip = strip,
         }),
-        .linkage = .static,
+        .linkage = linkage,
     });
     lib.linkLibCpp();
     lib.linkLibrary(icuuc);
@@ -265,7 +294,14 @@ fn libicudata(
     return lib;
 }
 
-fn libicui18n(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+fn libicui18n(
+    b: *std.Build,
+    icuuc: *std.Build.Step.Compile,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    linkage: std.builtin.LinkMode,
+    strip: ?bool,
+) *std.Build.Step.Compile {
     const upstream = b.dependency("icu4c", .{});
     const source = upstream.path("source");
     const lib = b.addLibrary(.{
@@ -273,10 +309,13 @@ fn libicui18n(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .strip = true,
+            .strip = strip,
         }),
-        .linkage = .static,
+        .linkage = linkage,
     });
+    if (linkage == .dynamic) {
+        lib.linkLibrary(icuuc);
+    }
     lib.linkLibCpp();
     lib.addIncludePath(source.path(b, "common"));
     lib.addIncludePath(source.path(b, "i18n"));
@@ -547,7 +586,14 @@ fn libicui18n(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
     return lib;
 }
 
-fn libicuuc(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+fn libicuuc(
+    b: *std.Build,
+    stubdata: *std.Build.Step.Compile,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    linkage: std.builtin.LinkMode,
+    strip: ?bool,
+) *std.Build.Step.Compile {
     const upstream = b.dependency("icu4c", .{});
     const source = upstream.path("source");
     const lib = b.addLibrary(.{
@@ -555,10 +601,13 @@ fn libicuuc(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .strip = true,
+            .strip = strip,
         }),
-        .linkage = .static,
+        .linkage = linkage,
     });
+    if (linkage == .dynamic) {
+        lib.linkLibrary(stubdata);
+    }
     lib.linkLibCpp();
     lib.addIncludePath(source.path(b, "common"));
     lib.addCSourceFiles(.{
@@ -774,17 +823,23 @@ fn libicuuc(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
     return lib;
 }
 
-fn libstubdata(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+fn libstubdata(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    linkage: std.builtin.LinkMode,
+    strip: ?bool,
+) *std.Build.Step.Compile {
     const upstream = b.dependency("icu4c", .{});
     const source = upstream.path("source");
     const lib = b.addLibrary(.{
-        .name = "libstubdata",
+        .name = "stubdata",
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
-            .strip = true,
+            .strip = strip,
         }),
-        .linkage = .static,
+        .linkage = linkage,
     });
     lib.linkLibCpp();
     lib.addIncludePath(source.path(b, "common"));
